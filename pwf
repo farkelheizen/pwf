@@ -2,7 +2,7 @@
 
 emulate -L zsh
 
-readonly PWF_VERSION=0.1.0
+readonly PWF_VERSION=0.1.1
 typeset -g PWF_ROOT=''
 typeset -g PWF_SCRIPTS_DIR=''
 typeset -g SELECTED_PLAN=''
@@ -19,7 +19,7 @@ Commands:
   status                  Report completion status for the resolved plan
   doctor                  Run plan-doctor and verify the active pointer
   path [managed-file]     Print the active plan path
-  help                    Show this help
+  help [install]          Show help or skill restoration instructions
 
 Managed files for 'path':
   task_plan.md, findings.md, progress.md
@@ -373,8 +373,25 @@ command_path() {
 }
 
 show_help() {
+  if (( $# == 1 )) && [[ "$1" == install ]]; then
+    cat <<'EOF'
+Usage: pwf help install
+
+Restore the project-local planning-with-files skill from skills-lock.json:
+
+  npx skills install --frozen-lockfile
+
+This restores the recorded commit and verifies the content hash. It requires
+the current skills CLI and a recent Node.js runtime.
+
+Do not use `npx skills add OthmanAdi/planning-with-files` to restore an
+existing checkout: `add` resolves fresh and may overwrite skills-lock.json.
+This help topic is read-only; pwf never invokes npx or installs skills.
+EOF
+    return 0
+  fi
   (( $# == 0 )) || {
-    print -u2 -r -- 'pwf: unexpected arguments'
+    print -u2 -r -- "pwf: unknown help topic: $1"
     return 2
   }
   usage

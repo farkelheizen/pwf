@@ -4,7 +4,7 @@
 [planning-with-files](https://github.com/OthmanAdi/planning-with-files) plans
 from anywhere inside a project tree.
 
-Version 0.1.0 delegates plan creation, selection, validation, and archiving to
+Version 0.1.1 delegates plan creation, selection, validation, and archiving to
 the planning-with-files scripts installed in the project. It does not replace
 the planning skill or modify the caller's shell environment.
 
@@ -56,18 +56,22 @@ The generated `.agents/` directory is intentionally ignored. The tracked
 [skills-lock.json](skills-lock.json) records the planning-with-files source,
 exact commit, skill path, and content hash used by this checkout.
 
-The lockfile is a reproducibility record, not an installer by itself. After a
-fresh checkout, restore the locked skill with the repository's current
-bootstrap command:
+The lockfile is a reproducibility record, not an installer by itself. After a fresh checkout, restore the locked skill with the repository's
+lockfile-aware bootstrap command:
 
 ```zsh
-npx skills add OthmanAdi/planning-with-files
+npx skills install --frozen-lockfile
 ```
 
-The restored skill must match the source, commit, skill path, and content hash
-recorded in `skills-lock.json`. Verify that the files appear under
+This restores the recorded commit and verifies the content hash. The restored
+skill must match the source, commit, skill path, and content hash recorded in
+`skills-lock.json`. Verify that the files appear under
 `.agents/skills/planning-with-files/` before running project-local planning
 commands. `pwf` does not install or verify skills automatically.
+
+The current `skills` CLI requires a recent Node.js runtime. `skills add
+OthmanAdi/planning-with-files` is an initial/update operation, not a
+lockfile restore: it resolves fresh and may overwrite the lock entry.
 
 ## Commands
 
@@ -130,6 +134,9 @@ Prints the active plan directory or one of its three managed files. Other file
 names are rejected.
 
 Use `pwf help` for the detected project and planning-script paths.
+
+Use `pwf help install` for a read-only dump of the lockfile-safe skill restore
+instructions. It prints the `npx` command but never executes it.
 
 ## Safety behavior
 

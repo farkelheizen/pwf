@@ -21,8 +21,9 @@ line.
   delegated move.
 - It does not install skills, dependencies, or packages automatically.
 - The generated `.agents/` skill directory is ignored by Git. Restore it from
-  the tracked `skills-lock.json` using trusted skills tooling, and verify that
-  the restored source, commit, path, and content hash match the lock entry.
+  the tracked `skills-lock.json` with
+  `npx skills install --frozen-lockfile`, and verify that the restored source,
+  commit, path, and content hash match the lock entry.
 
 The planning files can contain sensitive project information. Keep private
 planning state out of commits and do not place credentials, access tokens, or

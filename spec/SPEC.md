@@ -1,4 +1,4 @@
-# pwf 0.1.0 specification
+# pwf 0.1.1 specification
 
 ## Runtime and scope
 
@@ -38,17 +38,26 @@ available outside a project.
 The generated `.agents/` directory is ignored by this repository. The tracked
 `skills-lock.json` records the required source, commit, skill path, and content
 hash. After a fresh checkout, restore the locked skill with the repository's
-supported skills tooling, currently:
+lockfile-aware bootstrap command:
 
 ```zsh
-npx skills add OthmanAdi/planning-with-files
+npx skills install --frozen-lockfile
 ```
 
-The restore is complete only when the installed skill matches the lockfile
-entry. `pwf` does not install or verify skills automatically; the environment
-bootstrap is responsible for lockfile-aware installation and verification.
+This command restores the recorded commit and verifies `computedHash`. The
+restore is complete only when the installed skill matches the lockfile entry.
+`npx skills add OthmanAdi/planning-with-files` is not a restore operation: it
+resolves fresh and may overwrite the lock entry. `pwf` does not install or
+verify skills automatically.
 
 ## Commands
+
+### `pwf help [install]`
+
+With no topic, prints general usage. With the `install` topic, prints the
+lockfile-safe `npx skills install --frozen-lockfile` restore command and its
+prerequisites. This topic is read-only and must never invoke `npx` or modify
+the project.
 
 ### `pwf new <slug>`
 
