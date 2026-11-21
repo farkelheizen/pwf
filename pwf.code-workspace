@@ -1,0 +1,18 @@
+{
+  "window": {
+    "title": "pwf"
+  },
+  "folders": [
+    {
+      "name": "source",
+      "path": ".",
+    },
+    {
+      "name": "pwf local docs",
+      "path": "/Volumes/Lab1/Obsidian/Bill2/active-projects/pwf",
+    },
+  ],
+  "settings": {
+    "chat.agent.enabled": true,
+  },
+}

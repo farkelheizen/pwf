@@ -1,0 +1,13 @@
+# macOS system files
+.DS_Store
+
+# Locally installed agent skills; restore from skills-lock.json when needed.
+.agents/
+
+# planning-with-files working state & named plans
+.planning/
+
+# Root-level scratchpad fallbacks (when running without a named plan)
+task_plan.md
+findings.md
+progress.md

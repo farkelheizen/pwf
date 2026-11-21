@@ -1,0 +1,429 @@
+#!/bin/zsh
+
+emulate -L zsh
+
+readonly PWF_VERSION=0.1.0
+typeset -g PWF_ROOT=''
+typeset -g PWF_SCRIPTS_DIR=''
+typeset -g SELECTED_PLAN=''
+
+usage() {
+  cat <<'EOF'
+Usage: pwf <command> [arguments]
+
+Commands:
+  new <slug>              Create and activate a named plan
+  list [--archived|--all] List active or archived plans
+  use [plan-id|slug]      Select a plan; omitted query requires a TTY
+  done [plan-id] [--yes]  Preview or archive a plan
+  status                  Report completion status for the resolved plan
+  doctor                  Run plan-doctor and verify the active pointer
+  path [managed-file]     Print the active plan path
+  help                    Show this help
+
+Managed files for 'path':
+  task_plan.md, findings.md, progress.md
+
+The nearest ancestor containing a complete planning-with-files installation
+is used. An exported PLAN_ID takes precedence in upstream plan resolution.
+EOF
+}
+
+is_valid_plan_id() {
+  [[ -n "$1" ]] || return 1
+  [[ "$1" != .* ]] || return 1
+  [[ "$1" != *[!A-Za-z0-9._-]* ]]
+}
+
+has_required_scripts() {
+  local script_dir=$1 required
+  for required in init-session.sh set-active-plan.sh check-complete.sh plan-doctor.sh; do
+    [[ -f "$script_dir/$required" && -r "$script_dir/$required" && -x "$script_dir/$required" ]] || return 1
+  done
+}
+
+find_installation() {
+  local dir="${PWD:A}" candidate
+  local -a candidates
+  candidates=(
+    '.agents/skills/planning-with-files/scripts'
+    '.github/skills/planning-with-files/scripts'
+    '.claude/skills/planning-with-files/scripts'
+    '.opencode/skills/planning-with-files/scripts'
+  )
+
+  while :; do
+    for candidate in "${candidates[@]}"; do
+      candidate="$dir/$candidate"
+      if has_required_scripts "$candidate"; then
+        PWF_ROOT="$dir"
+        PWF_SCRIPTS_DIR="$candidate"
+        return 0
+      fi
+    done
+    [[ "$dir" == '/' ]] && break
+    dir="${dir:h}"
+  done
+  return 1
+}
+
+require_installation() {
+  if ! find_installation; then
+    print -u2 -r -- "pwf: no complete planning-with-files installation found above $PWD"
+    print -u2 -r -- 'pwf: install planning-with-files in the project, then retry'
+    return 1
+  fi
+  if ! cd -- "$PWF_ROOT"; then
+    print -u2 -r -- "pwf: cannot enter project root: $PWF_ROOT"
+    return 1
+  fi
+}
+
+active_plan_id() {
+  local active_file='.planning/.active_plan' value
+  [[ -f "$active_file" && ! -L "$active_file" && -r "$active_file" ]] || return 1
+  is_contained_path "$active_file" || return 1
+  value="$(< "$active_file")"
+  local bom=$'\357\273\277'
+  [[ "$value" == "$bom"* ]] && value="${value#"$bom"}"
+  value="${value//$'\r'/}"
+  value="${value//[[:space:]]/}"
+  is_valid_plan_id "$value" || return 1
+  print -r -- "$value"
+}
+
+is_contained_path() {
+  local path=$1 canonical root
+  [[ -e "$path" || -L "$path" ]] || return 1
+  canonical="${path:A}"
+  root="${PWF_ROOT:A}"
+  [[ "$canonical" == "$root" || "$canonical" == "$root"/* ]]
+}
+
+is_plan_directory() {
+  local plan_id=$1 plan_root=".planning" plan_dir task_file findings_file progress_file file
+  is_valid_plan_id "$plan_id" || return 1
+  plan_dir="$plan_root/$plan_id"
+  task_file="$plan_dir/task_plan.md"
+  findings_file="$plan_dir/findings.md"
+  progress_file="$plan_dir/progress.md"
+  [[ -d "$plan_root" && ! -L "$plan_root" ]] || return 1
+  [[ -d "$plan_dir" && ! -L "$plan_dir" ]] || return 1
+  is_contained_path "$plan_root" || return 1
+  is_contained_path "$plan_dir" || return 1
+  for file in "$task_file" "$findings_file" "$progress_file"; do
+    [[ -f "$file" && ! -L "$file" ]] || return 1
+    is_contained_path "$file" || return 1
+  done
+}
+
+list_plan_ids() {
+  local plan_dir plan_id
+  setopt local_options null_glob
+  for plan_dir in .planning/*(/N); do
+    [[ -L "$plan_dir" ]] && continue
+    plan_id="${plan_dir:t}"
+    is_plan_directory "$plan_id" && print -r -- "$plan_id"
+  done
+}
+
+managed_file() {
+  case "$1" in
+    task_plan.md|findings.md|progress.md) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+select_plan() {
+  local query=${1-} plan_dir plan_id choice index
+  local -a matches
+  matches=()
+  SELECTED_PLAN=''
+
+  if [[ -n "$query" ]]; then
+    if is_plan_directory "$query"; then
+      SELECTED_PLAN="$query"
+      return 0
+    fi
+    is_valid_plan_id "$query" || {
+      print -u2 -r -- "pwf: invalid plan ID or slug: $query"
+      return 1
+    }
+    setopt local_options null_glob
+    for plan_dir in .planning/*(/N); do
+      [[ -L "$plan_dir" ]] && continue
+      plan_id="${plan_dir:t}"
+      is_plan_directory "$plan_id" || continue
+      [[ "$plan_id" == *-"$query" ]] && matches+=("$plan_id")
+    done
+    if (( ${#matches} == 0 )); then
+      print -u2 -r -- "pwf: no plan matches '$query'"
+      return 1
+    fi
+    if (( ${#matches} > 1 )); then
+      print -u2 -r -- "pwf: multiple plans match '$query':"
+      print -u2 -r -- "${matches[@]}"
+      return 1
+    fi
+    SELECTED_PLAN="${matches[1]}"
+    return 0
+  fi
+
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    print -u2 -r -- 'pwf: selecting a plan without a query requires an interactive terminal'
+    print -u2 -r -- 'pwf: provide an exact plan ID or unique slug instead'
+    return 1
+  fi
+
+  while IFS= read -r plan_id; do
+    [[ -n "$plan_id" ]] && matches+=("$plan_id")
+  done < <(list_plan_ids)
+  if (( ${#matches} == 0 )); then
+    print -u2 -r -- 'pwf: no named plans found'
+    return 1
+  fi
+
+  index=1
+  for plan_id in "${matches[@]}"; do
+    print -r -- "$index) $plan_id"
+    (( index++ ))
+  done
+  print -n -- 'Select plan number: '
+  if ! read -r choice; then
+    print -u2 -r -- 'pwf: no plan selection was provided'
+    return 1
+  fi
+  if [[ "$choice" != <-> ]] || (( choice < 1 || choice >= index )); then
+    print -u2 -r -- 'pwf: invalid plan selection'
+    return 1
+  fi
+  SELECTED_PLAN="${matches[$choice]}"
+}
+
+command_new() {
+  local slug=${1-} output rc line plan_id=''
+  if (( $# != 1 )) || [[ -z "$slug" || "$slug" == -* ]]; then
+    print -u2 -r -- 'Usage: pwf new <slug>'
+    return 2
+  fi
+
+  output="$("$PWF_SCRIPTS_DIR/init-session.sh" "$slug")"
+  rc=$?
+  if (( rc != 0 )); then
+    [[ -n "$output" ]] && print -u2 -r -- "$output"
+    return "$rc"
+  fi
+  [[ -n "$output" ]] && print -r -- "$output"
+  for line in ${(f)output}; do
+    case "$line" in
+      PLAN_ID=*) plan_id="${line#PLAN_ID=}" ;;
+    esac
+  done
+  if ! is_valid_plan_id "$plan_id" || ! is_plan_directory "$plan_id"; then
+    print -u2 -r -- 'pwf: init-session.sh did not report a valid created plan'
+    return 1
+  fi
+  print -r -- "Active plan: $PWF_ROOT/.planning/$plan_id"
+}
+
+command_list() {
+  case "${1-}" in
+    '')
+      (( $# == 0 )) || {
+        print -u2 -r -- 'Usage: pwf list [--archived|--all]'
+        return 2
+      }
+      "$PWF_SCRIPTS_DIR/set-active-plan.sh" --list
+      ;;
+    --archived)
+      (( $# == 1 )) || {
+        print -u2 -r -- 'Usage: pwf list [--archived|--all]'
+        return 2
+      }
+      "$PWF_SCRIPTS_DIR/set-active-plan.sh" --list --archived
+      ;;
+    --all)
+      (( $# == 1 )) || {
+        print -u2 -r -- 'Usage: pwf list [--archived|--all]'
+        return 2
+      }
+      "$PWF_SCRIPTS_DIR/set-active-plan.sh" --list || return $?
+      print
+      "$PWF_SCRIPTS_DIR/set-active-plan.sh" --list --archived
+      ;;
+    *)
+      print -u2 -r -- 'Usage: pwf list [--archived|--all]'
+      return 2
+      ;;
+  esac
+}
+
+command_use() {
+  (( $# <= 1 )) || {
+    print -u2 -r -- 'Usage: pwf use [plan-id|slug]'
+    return 2
+  }
+  select_plan "${1-}" || return $?
+  "$PWF_SCRIPTS_DIR/set-active-plan.sh" "$SELECTED_PLAN"
+}
+
+command_done() {
+  local target='' yes=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --yes)
+        (( yes == 0 )) || {
+          print -u2 -r -- 'pwf: duplicate --yes'
+          return 2
+        }
+        yes=1
+        ;;
+      -*)
+        print -u2 -r -- "pwf: unknown option: $arg"
+        return 2
+        ;;
+      '')
+        print -u2 -r -- 'pwf: empty plan ID'
+        return 2
+        ;;
+      *)
+        [[ -z "$target" ]] || {
+          print -u2 -r -- 'Usage: pwf done [plan-id] [--yes]'
+          return 2
+        }
+        target="$arg"
+        ;;
+    esac
+  done
+  if [[ -z "$target" ]]; then
+    target="$(active_plan_id)" || {
+      print -u2 -r -- 'pwf: no valid active plan is set'
+      return 1
+    }
+  fi
+  if ! is_plan_directory "$target"; then
+    print -u2 -r -- "pwf: plan does not exist: $target"
+    return 1
+  fi
+  if (( yes )); then
+    "$PWF_SCRIPTS_DIR/set-active-plan.sh" --archive "$target" --yes
+  else
+    "$PWF_SCRIPTS_DIR/set-active-plan.sh" --archive "$target"
+  fi
+}
+
+command_status() {
+  (( $# == 0 )) || {
+    print -u2 -r -- 'Usage: pwf status'
+    return 2
+  }
+  "$PWF_SCRIPTS_DIR/check-complete.sh"
+}
+
+command_doctor() {
+  local target
+  (( $# == 0 )) || {
+    print -u2 -r -- 'Usage: pwf doctor'
+    return 2
+  }
+  "$PWF_SCRIPTS_DIR/plan-doctor.sh" || return $?
+  target="$(active_plan_id)" || {
+    print -u2 -r -- 'pwf: .planning/.active_plan is missing or invalid'
+    return 1
+  }
+  if ! is_plan_directory "$target"; then
+    print -u2 -r -- "pwf: active plan does not exist: $target"
+    return 1
+  fi
+  print -r -- "Active plan verified: $target"
+}
+
+command_path() {
+  local target file
+  (( $# <= 1 )) || {
+    print -u2 -r -- 'Usage: pwf path [task_plan.md|findings.md|progress.md]'
+    return 2
+  }
+  target="$(active_plan_id)" || {
+    print -u2 -r -- 'pwf: no valid active plan is set'
+    return 1
+  }
+  if ! is_plan_directory "$target"; then
+    print -u2 -r -- "pwf: active plan does not exist: $target"
+    return 1
+  fi
+  file="${1-}"
+  if [[ -n "$file" ]]; then
+    managed_file "$file" || {
+      print -u2 -r -- "pwf: unsupported managed file: $file"
+      return 2
+    }
+    [[ -f ".planning/$target/$file" && ! -L ".planning/$target/$file" ]] || {
+      print -u2 -r -- "pwf: managed file does not exist: $file"
+      return 1
+    }
+    is_contained_path ".planning/$target/$file" || {
+      print -u2 -r -- "pwf: managed file is outside the project: $file"
+      return 1
+    }
+    print -r -- "$PWF_ROOT/.planning/$target/$file"
+  else
+    print -r -- "$PWF_ROOT/.planning/$target"
+  fi
+}
+
+show_help() {
+  (( $# == 0 )) || {
+    print -u2 -r -- 'pwf: unexpected arguments'
+    return 2
+  }
+  usage
+  if find_installation; then
+    print
+    print -r -- "Detected project root: $PWF_ROOT"
+    print -r -- "Planning scripts: $PWF_SCRIPTS_DIR"
+  fi
+}
+
+cmd=${1-help}
+if (( $# > 0 )); then
+  shift
+fi
+
+case "$cmd" in
+  ''|help|--help|-h)
+    show_help "$@"
+    ;;
+  --version|-V)
+    if (( $# > 0 )); then
+      print -u2 -r -- 'pwf: unexpected arguments'
+      exit 2
+    fi
+    print -r -- "pwf $PWF_VERSION"
+    ;;
+  new|init|create)
+    require_installation && command_new "$@"
+    ;;
+  list|ls)
+    require_installation && command_list "$@"
+    ;;
+  use|switch|select)
+    require_installation && command_use "$@"
+    ;;
+  done|archive|finish)
+    require_installation && command_done "$@"
+    ;;
+  status|check)
+    require_installation && command_status "$@"
+    ;;
+  doctor)
+    require_installation && command_doctor "$@"
+    ;;
+  path|where)
+    require_installation && command_path "$@"
+    ;;
+  *)
+    print -u2 -r -- "pwf: unknown command or option: $cmd"
+    exit 2
+    ;;
+esac
