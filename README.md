@@ -4,9 +4,11 @@
 [planning-with-files](https://github.com/OthmanAdi/planning-with-files) plans
 from anywhere inside a project tree.
 
-Version 0.1.1 delegates plan creation, selection, validation, and archiving to
+Version 0.1.2 delegates plan creation, selection, validation, and archiving to
 the planning-with-files scripts installed in the project. It does not replace
 the planning skill or modify the caller's shell environment.
+
+See the [changelog](CHANGELOG.md) for version history.
 
 ## Requirements
 

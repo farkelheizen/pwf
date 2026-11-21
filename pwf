@@ -2,7 +2,7 @@
 
 emulate -L zsh
 
-readonly PWF_VERSION=0.1.1
+readonly PWF_VERSION=0.1.2
 typeset -g PWF_ROOT=''
 typeset -g PWF_SCRIPTS_DIR=''
 typeset -g SELECTED_PLAN=''
