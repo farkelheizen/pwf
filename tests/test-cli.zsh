@@ -96,7 +96,7 @@ expect_status 2 'unknown help topic fails'
 for arg in --version -V; do
   run_capture "$ROOT/pwf" "$arg"
   expect_status 0 "$arg succeeds"
-  expect_contains 'pwf 0.1.1' "$arg shows version"
+  expect_contains 'pwf 0.1.2' "$arg shows version"
 done
 
 run_capture "$ROOT/pwf" invalid

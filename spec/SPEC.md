@@ -1,4 +1,4 @@
-# pwf 0.1.1 specification
+# pwf 0.1.2 specification
 
 ## Runtime and scope
 
