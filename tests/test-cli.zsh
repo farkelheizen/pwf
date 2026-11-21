@@ -85,10 +85,18 @@ for arg in help --help -h; do
   expect_contains 'Usage: pwf <command>' "$arg shows help"
 done
 
+run_capture "$ROOT/pwf" help install
+expect_status 0 'help install succeeds'
+expect_contains 'npx skills install --frozen-lockfile' 'help install shows the restore command'
+expect_contains 'pwf never invokes npx' 'help install explains read-only behavior'
+
+run_capture "$ROOT/pwf" help unknown
+expect_status 2 'unknown help topic fails'
+
 for arg in --version -V; do
   run_capture "$ROOT/pwf" "$arg"
   expect_status 0 "$arg succeeds"
-  expect_contains 'pwf 0.1.0' "$arg shows version"
+  expect_contains 'pwf 0.1.1' "$arg shows version"
 done
 
 run_capture "$ROOT/pwf" invalid
